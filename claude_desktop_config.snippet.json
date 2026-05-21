@@ -1,0 +1,10 @@
+{
+  "_comment_README": "This is a SNIPPET, not the full file. Paste it inside your claude_desktop_config.json (located at %APPDATA%\\Claude\\claude_desktop_config.json) in the mcpServers block. If your config already has other MCP servers, add only the 'tableau-workflow' entry without replacing the rest. Update the path to where you cloned the repo.",
+
+  "mcpServers": {
+    "tableau-workflow": {
+      "command": "C:\\path\\to\\tableau-workflow\\run-server.bat",
+      "args": []
+    }
+  }
+}

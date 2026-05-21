@@ -1,0 +1,57 @@
+# ================================================================
+# .gitignore — Tableau Workflow Assistant
+# ================================================================
+# CRITICAL: nunca commitear .env. Contiene el PAT de Tableau Cloud.
+# ================================================================
+
+# Credenciales / config local
+.env
+.env.*
+!.env.example
+
+# Virtualenv
+.venv/
+venv/
+env/
+ENV/
+
+# Catálogo persistido (datos del usuario)
+*.tableau-workflow/
+catalog.json
+*.catalog.json
+
+# Tempdirs de Tableau (workbooks descargados + extracts)
+tableau_wb_*/
+tableau_bkp_*/
+twb_extract_*/
+
+# Workbooks locales (por si están en la carpeta del proyecto)
+*.twb
+*.twbx
+
+# Python build/cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
