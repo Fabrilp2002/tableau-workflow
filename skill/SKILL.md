@@ -11,14 +11,14 @@ If this is the first tool call of the conversation, call `site_info` to confirm 
 
 ## The 4 workflows
 
-| # | Workflow | Status |
-|---|---|---|
-| 1 | **Refresh** — `refresh_and_wait(datasource_id)` | Phase 1 ✓ |
-| 2 | **Clone + Remap** — Phase 2, pending | not implemented |
-| 3 | **Bug fix** — Phase 3, pending | not implemented |
-| 4 | **Compose** — Phase 3, pending | not implemented |
+| # | Workflow | Status | Playbook |
+|---|---|---|---|
+| 1 | **Refresh** — `refresh_and_wait(datasource_id)` | ✓ Phase 1 | `workflows/refresh.md` |
+| 2 | **Fix broken dashboard** — wrong counts, broken fields, stale extract | ✓ Validated end-to-end | `workflows/fix-broken-dashboard.md` |
+| 3 | **Clone + Remap** — Phase 2 design | not implemented | — |
+| 4 | **Compose** — Phase 3 design | not implemented | — |
 
-If asked for Phase 2/3, explain it's designed but not built. Offer what Phase 1 can do: catalog search, parse workbooks, compare datasources. **Do not simulate operations that don't exist.**
+If asked for Clone/Compose, explain they're designed but not built. Offer what's implemented: catalog search, parse workbooks, compare datasources, the fix-broken-dashboard methodology. **Do not simulate operations that don't exist.**
 
 ## Operating rules
 
@@ -51,10 +51,24 @@ If asked for Phase 2/3, explain it's designed but not built. Offer what Phase 1 
 
 ## References
 
-- `workflows/refresh.md` — the main implemented workflow
+- `workflows/refresh.md` — basic refresh workflow
+- `workflows/fix-broken-dashboard.md` — **end-to-end methodology for broken dashboards** (5-phase: diagnose → build new DS → clean workbook → test in TESTING → promote to prod → verify refresh). 5 real cases documented (Polaris, Older Persons, Signal CFN, UK New, Bray).
 - `references/twb-xml-anatomy.md` — .twb XML structure for reasoning about edits
 - `SDD.md` — short overview (see `docs/full/SDD.md` for full design)
 - `SECURITY.md` — security posture summary
+
+## Bug patterns observed in production (use as quick triage)
+
+When user reports a broken dashboard, match symptoms against:
+
+| Symptom | Likely cause | See section |
+|---|---|---|
+| Fields red ⚠ in panel + lowercase variants exist | Schema case mismatch (Cloud connector normalized camelCase) | fix-broken-dashboard §1.2 |
+| Count wrong but DS extract has correct data | Embedded extract cached (workbook .hyper from past publish) | fix-broken-dashboard §1.1 |
+| Specific org/project never appears in filter | SQL `WHERE` clause has hardcoded ID, OR `<filter context='true'>` with enumerated members | fix-broken-dashboard §1.3 + §1.4 |
+| User cleared all filters but count still wrong | Embedded extract pre-filtered OR `<shared-view>` context filters | fix-broken-dashboard §1.1 + §1.4 |
+| Dropdown lists new org but selecting doesn't filter | Calc bin with legacy member values | fix-broken-dashboard §1.5 |
+| Monthly Income shows 90%+ in `<£100` bucket | Calc field treats NULL→0 → "<£100" bucket | check raw column distribution in Postgres |
 
 ## Mental checklist before acting
 
