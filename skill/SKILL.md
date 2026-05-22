@@ -63,12 +63,17 @@ When user reports a broken dashboard, match symptoms against:
 
 | Symptom | Likely cause | See section |
 |---|---|---|
-| Fields red ⚠ in panel + lowercase variants exist | Schema case mismatch (Cloud connector normalized camelCase) | fix-broken-dashboard §1.2 |
-| Count wrong but DS extract has correct data | Embedded extract cached (workbook .hyper from past publish) | fix-broken-dashboard §1.1 |
-| Specific org/project never appears in filter | SQL `WHERE` clause has hardcoded ID, OR `<filter context='true'>` with enumerated members | fix-broken-dashboard §1.3 + §1.4 |
-| User cleared all filters but count still wrong | Embedded extract pre-filtered OR `<shared-view>` context filters | fix-broken-dashboard §1.1 + §1.4 |
-| Dropdown lists new org but selecting doesn't filter | Calc bin with legacy member values | fix-broken-dashboard §1.5 |
+| Fields red ⚠ in panel + lowercase variants exist | Schema case mismatch (Cloud connector normalized camelCase) | fix-broken-dashboard §2 |
+| Count wrong but DS extract has correct data | Embedded extract cached (workbook .hyper from past publish) | fix-broken-dashboard §1 |
+| Specific org/project never appears in filter | SQL `WHERE` clause has hardcoded ID, OR `<filter context='true'>` with enumerated members | fix-broken-dashboard §3 + §4 |
+| User cleared all filters but count still wrong | Embedded extract pre-filtered OR `<shared-view>` context filters | fix-broken-dashboard §1 + §4 |
+| Dropdown lists new org but selecting doesn't filter | Calc bin with legacy member values | fix-broken-dashboard §5 |
 | Monthly Income shows 90%+ in `<£100` bucket | Calc field treats NULL→0 → "<£100" bucket | check raw column distribution in Postgres |
+| Multilang clones show different counts (same DS, same survey) | One clone has `<max>#YYYY-MM-DD#</max>` stuck in a quantitative date filter | fix-broken-dashboard §6 + §7 |
+| Workbook shows N snapshots but Postgres has N+76 (or similar offset = year-boundary count) | Date filter quantitative excluding recent data silently | fix-broken-dashboard §6 |
+| Sheets sueltos aparecen como views publicadas, user quiere solo dashboards | `<window name='X' hidden='true'>` flag needs to be added to orphan worksheets | fix-broken-dashboard Phase 3.5 |
+| `populate_csv` returns "data sources not connected" after publish | DS underlying has `embed_password=False` — update via `populate_connections` + `update_connection(embed=True)` | fix-broken-dashboard Cloud limitations table |
+| Concurrent TSC operations fail with 401 | Token rotation con Monitors corriendo en background — serializar operaciones o usar MCP tool en lugar de TSC | fix-broken-dashboard Cloud limitations table |
 
 ## Mental checklist before acting
 

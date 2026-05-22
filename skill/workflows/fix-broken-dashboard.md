@@ -1,6 +1,6 @@
 # Fix-Broken-Dashboard — End-to-End Methodology
 
-Workflow probado en producción para arreglar dashboards que muestran datos incorrectos, fields rotos, o counts que no matchean la base de datos. Esta guía sintetiza lo aprendido fixeando 5 dashboards (Bray, Polaris, Older Persons, Signal CFN, UK New) en una misma sesión.
+Workflow probado en producción para arreglar dashboards que muestran datos incorrectos, fields rotos, o counts que no matchean la base de datos. Esta guía sintetiza lo aprendido fixeando 8 dashboards en sesiones reales (Bray, Polaris, Older Persons, Signal CFN, UK New, MOROCCO ×3) y verificando end-to-end con CSV download.
 
 ## When to use
 
@@ -19,7 +19,7 @@ User dice cosas como:
 4. **Verificar visualmente via CSV download** — antes de declarar "arreglado", bajá CSV del view publicado con `populate_csv()` y compará con Postgres.
 5. **Publicar a un proyecto de prueba primero** — usar `TESTING` project como sandbox antes de overwrite de producción.
 
-## The 5 bug categories observed
+## The 7 bug categories observed
 
 ### 1. Embedded extract stale (cache local del workbook con datos viejos)
 
@@ -68,6 +68,39 @@ User dice cosas como:
 **Diagnóstico**: el dropdown está bound a un `calculated bin` (e.g. `[organization (grupo)]`) que solo conoce las orgs legacy del momento del publish. Los buckets auto-generados para orgs nuevas no matchean con los labels del dropdown.
 
 **Fix**: cambiar las `<zone param='...'>` para que apunten al campo raw (`[organization]`) en lugar del calc bin.
+
+### 6. Date filter quantitative con `<max>` silencioso
+
+**Síntoma** (caso MOROCCO Arabic): el dashboard muestra significativamente menos snapshots que los otros 2 workbooks con misma DS y misma encuesta. No hay context filters visibles. `populate_csv` confirma el gap.
+
+**Diagnóstico**: buscar en el `.twb` XML un filter `class='quantitative'` sobre una columna date/fecha que tenga `<max>#YYYY-MM-DD#</max>` (o `<min>`). Estos filters no aparecen en el panel Filters de los sheets — solo en el XML. Se crean cuando alguien arrastra un date range slider y deja un valor "stuck" al guardar.
+
+```xml
+<filter class='quantitative' column='[sqlproxy.X].[none:Survey_date (copia)_...:qk]' included-values='in-range'>
+  <max>#2026-01-27#</max>  ← excluye TODO posterior a esa fecha
+</filter>
+```
+
+Caso real: este filter excluía 76/309 snapshots (los de 2026), dando 233 visibles en Arabic vs 309 en los otros workbooks.
+
+**Fix**: strip el `<max>...</max>` (y/o `<min>...</min>`) dejando el `<filter ... included-values='in-range' />` self-closing (= "all values").
+
+```python
+pattern = r"(<filter\s+class='quantitative'\s+column='[^']*Survey_date[^']*'[^>]*included-values='in-range'>)\s*<max>[^<]+</max>\s*(</filter>)"
+content = re.sub(pattern, r"\1\2", content)
+```
+
+### 7. Multilang workbooks con data divergente
+
+**Síntoma** (caso MOROCCO): 3 workbooks en idiomas distintos (e.g. Dashboard / Dashboard-Arabic / Dashboard-Francais) sobre la **misma** DS y survey muestran counts diferentes.
+
+**Diagnóstico**: el patrón típico de multilang es **un workbook base + N clones traducidos** con calc fields `CASE WHEN raw_value = 'X' THEN 'translation' END` para labels. Cambian SOLO el display de labels, NO la data. Si los counts difieren, alguno de los clones tiene un filter divergente — usualmente el clon fue editado en distinto momento y quedaron filters "stuck" del trabajo del editor.
+
+**Bug típico**: date filter con `<max>` (categoría 6 arriba) o un context filter con members enumerados que no se replicó a los otros idiomas.
+
+**Fix**: identificar el workbook "ground truth" (el que matchea Postgres), encontrar el diff de filters con los otros, y portear el fix. NO mezclar la lógica de traducción (calc fields CASE) — eso queda en cada workbook como está.
+
+**Cuidado especial**: cuando hay sheets sueltos visibles ("publish-as-view") en algunos clones pero no en otros, el usuario verá "tabs distintas" entre workbooks. Para uniformidad, hide los sheets que no son dashboards usando `hidden='true'` en `<window name='X'>` (ver Phase 3.5 abajo).
 
 ## The end-to-end workflow (60-90 min total)
 
@@ -136,7 +169,25 @@ PROBLEMATIC = [
 # For each filter, check if column attr contains any fragment → strip.
 # Also: disable embedded extract (<extract enabled='true'> → 'false').
 # Also: strip <shelf-sort-v2 .../> orphan blocks (cause publish warnings).
+# Also: strip <max>#YYYY-MM-DD#</max> inside quantitative date filters (cat. 6).
 ```
+
+### Phase 3.5 — Hide orphan worksheets (publish-as-view cleanup, 5 min)
+
+Si el usuario quiere que solo los dashboards aparezcan en el listing publicado (no los sheets sueltos como views separadas), agregar `hidden='true'` a los `<window name='X'>` que NO sean dashboards.
+
+```python
+import re
+# Get dashboard names
+dash_names = set(re.findall(r"<dashboard[^>]*\s+name=['\"]([^'\"]+)['\"]", content))
+# For each <window name='X'> entry:
+#   if X in dash_names: keep visible (no hidden attr)
+#   else: add hidden='true'
+window_pattern = r"<window\b[^>]*\bname=['\"]([^'\"]+)['\"][^>]*?(/?>)"
+# Walk matches, modify opening tag accordingly.
+```
+
+Esto controla tanto las tabs en Tableau Desktop como las views publicadas en Cloud — todo en un solo atributo XML.
 
 ### Phase 4 — Test in TESTING project (10 min)
 
@@ -200,6 +251,9 @@ Esto confirma que los daily schedules funcionarán (mismo authentication path).
 | Job query for `create_extracts` jobs falla en REST API | Usar poll de `updated_at` o `has_extracts` change |
 | Workbook publish da error con shelf-sorts huérfanos | Strip `<shelf-sort-v2/>` self-closing blocks |
 | `"Unable to connect to published data source to refresh data. Allow refresh access"` | Re-publicar workbook desde Desktop con "Allow refresh access" tildado |
+| Workbook publicado da error `"data sources not connected"` al hacer `populate_csv` | El DS underlying tiene `embed_password=False`. Hacer `populate_connections` del DS, setear `c.username/password/embed_password=True`, llamar `server.datasources.update_connection(ds, c)`. Esto NO funciona para connections tipo sqlproxy en el workbook — solo para la DS publicada subyacente. |
+| Token TSC se invalida (401) durante operaciones concurrentes con un Monitor en background | Cada Monitor + sign_in concurrente puede causar token rotation. Workaround: serializar operaciones en un solo script con un sign_in, o usar el MCP tool en lugar de TSC directo (MCP maneja su propia sesión). |
+| Time zone label en el dialog Tableau Cloud dice `(UTC-03:00) America/Asunción` pero el server usa UTC-4 en mayo | Paraguay no observa DST consistentemente. Verificar el `next_run_at` en UTC del task creado, no confiar en el label de la UI. 16:20 Asunción label → 20:20 UTC actual. |
 
 ## Common Postgres query patterns
 
@@ -266,6 +320,9 @@ Antes de tocar producción:
 | Signal CFN | DS sin embed_password | 15 min |
 | ds_united_kingdom_new | DS sin embed_password, schedule suspendido | 15 min |
 | Signal - Bray & North Wicklow | TODOS los bugs simultáneos (categorías 1-5) | 120 min |
+| MOROCCO - Dashboard | Hide 6 sheets sueltos (orphan publish-as-view) | 10 min |
+| MOROCCO - Dashboard-Arabic | Date filter `<max>#2026-01-27#</max>` excluía 76 snapshots (cat. 6) + hide 4 sheets sueltos + DS sin embed_password | 30 min |
+| MOROCCO - Dashboard-Francais | Hide 6 sheets sueltos | 10 min |
 
 El de Bray fue el más complejo. Tenía:
 - Embedded extract del 29-abril con 728 rows hardcoded
@@ -275,6 +332,19 @@ El de Bray fue el más complejo. Tenía:
 - Workbook publicado sin "Allow refresh access"
 
 End result: 22 families (de 12 anteriores), 24 surveys, todos los campos verdes, refresh manual confirmado en 42-108s.
+
+El de MOROCCO Arabic fue el más sutil. El subagente inicial sospechaba que Francais era el divergente (por translation calc fields), pero la realidad era opuesta — Arabic tenía un `<max>#2026-01-27#</max>` invisible que excluía silenciosamente los 76 snapshots de 2026. **Lección**: nunca confiar solo en el análisis estructural — siempre comparar números reales via CSV download contra Postgres baseline ANTES de proponer hipótesis.
+
+End result: los 3 muestran 309 snapshots (matchea Postgres), cada uno preservando idioma de labels, y solo los 4 dashboards visibles (sheets sueltos hidden).
+
+## Tips operativos adicionales (de sesiones reales)
+
+- **Cuando bajes el workbook para inspeccionar, NO uses `include_extract=True` por default** — el `.hyper` puede ser 100x más grande que el `.twb` solo y comer tiempo+disk. Trae el extract solo si necesitas validar el cache hyper bug (cat. 1).
+- **Para verificar schedule auth funciona**: dispara un `server.datasources.refresh(ds)` manual ANTES de esperar el schedule programado. Si el manual falla, el schedule también va a fallar. Si el manual succeeds, el schedule también lo hará (mismo authentication path).
+- **`consecutive_failed_count` se resetea automáticamente** cuando un refresh succeeds. Después de un fix exitoso + manual refresh, el counter va de 5 → 0 sin intervención.
+- **Para confirmar identity de un workbook**: comparar `webpage_url` (cambia el ID en la URL si se creó nuevo) y `id` (LUID) antes y después del publish. Si ambos se preservan, fue un overwrite limpio.
+- **Si vas a hacer múltiples publishes overwrites concurrentes**: serializa en un solo script con un solo `with server.auth.sign_in(auth):` y NO mezcles con Monitors corriendo en background (causan token rotation y 401).
+- **Cuando publicas 3+ workbooks juntos** con dependencias compartidas (mismo DS), una sola subida + 3 publishes en serie es más confiable que en paralelo (Cloud rate-limits a veces).
 
 ## References
 
